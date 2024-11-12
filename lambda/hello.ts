@@ -1,4 +1,4 @@
-exports.handler = async (event) => {
+exports.handler = async (event: unknown) => {
     return {
         statusCode: 200,
         headers: { "Content-Type": "text/plain" },
