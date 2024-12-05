@@ -321,22 +321,19 @@ export class GalvitronStack extends cdk.Stack {
           build: {
             commands: [
               'npm run build',
-              'cp appspec.yml .',
-              'cp -r scripts .',
-              'cp ecosystem.config.js .',
-              'cp package*.json .',
               'npm ci --production'
-            ]
-          },
-          post_build: {
-            commands: [
-              'zip -qr deployment.zip appspec.yml scripts ecosystem.config.js node_modules package*.json app.js',
-              'unzip -l deployment.zip'
             ]
           }
         },
         artifacts: {
-          files: ['deployment.zip']
+          files: [
+            'appspec.yml',
+            'scripts/**/*',
+            'ecosystem.config.js',
+            'node_modules/**/*',
+            'package*.json',
+            'app.js'
+          ]
         }
       })
     });
