@@ -7,6 +7,7 @@ export interface IAMRolesConstructProps {
   sentinelBucket: s3.IBucket;
   region: string;
   account: string;
+  dynamoTableArn: string;
 }
 
 export class IAMRolesConstruct extends Construct {
@@ -19,13 +20,41 @@ export class IAMRolesConstruct extends Construct {
 
     // EC2 Instance Role
     this.instanceRole = new iam.Role(this, 'EC2Role', {
-      assumedBy: new iam.ServicePrincipal('ec2.amazonaws.com'),
-      managedPolicies: [
-        iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonSSMManagedInstanceCore'),
-        iam.ManagedPolicy.fromAwsManagedPolicyName('AWSCodeDeployFullAccess'),
-        iam.ManagedPolicy.fromAwsManagedPolicyName('CloudWatchAgentServerPolicy'),
-      ],
-    });
+        assumedBy: new iam.ServicePrincipal('ec2.amazonaws.com'),
+        managedPolicies: [
+          iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonSSMManagedInstanceCore'),
+          iam.ManagedPolicy.fromAwsManagedPolicyName('AWSCodeDeployFullAccess'),
+          iam.ManagedPolicy.fromAwsManagedPolicyName('CloudWatchAgentServerPolicy'),
+        ],
+        inlinePolicies: {
+          'DynamoDBFullAccess': new iam.PolicyDocument({
+            statements: [
+              new iam.PolicyStatement({
+                effect: iam.Effect.ALLOW,
+                actions: [
+                  'dynamodb:PutItem',
+                  'dynamodb:GetItem',
+                  'dynamodb:UpdateItem',
+                  'dynamodb:DeleteItem',
+                  'dynamodb:BatchGetItem',
+                  'dynamodb:BatchWriteItem',
+                  'dynamodb:Query',
+                  'dynamodb:Scan',
+                  'dynamodb:DescribeTable',
+                  'dynamodb:CreateTable',
+                  'dynamodb:DeleteTable',
+                  'dynamodb:ListTables'
+                ],
+                resources: [
+                  props.dynamoTableArn,
+                  `${props.dynamoTableArn}/*`,
+                  `arn:aws:dynamodb:${props.region}:${props.account}:table/*`  // Add wildcard for table listing
+                ]
+              })
+            ]
+          })
+        }
+      });
 
     // CodeDeploy permissions for instance role
     this.instanceRole.addToPolicy(new iam.PolicyStatement({
@@ -85,21 +114,23 @@ export class IAMRolesConstruct extends Construct {
       ]
     }));
 
-    // DynamoDB permissions for instance role
-    // Note: Table-specific permissions are added in the main stack
     this.instanceRole.addToPolicy(new iam.PolicyStatement({
-      effect: iam.Effect.ALLOW,
-      actions: [
-        'dynamodb:PutItem',
-        'dynamodb:GetItem',
-        'dynamodb:UpdateItem',
-        'dynamodb:DeleteItem',
-        'dynamodb:BatchGetItem',
-        'dynamodb:BatchWriteItem',
-        'dynamodb:Query',
-        'dynamodb:Scan'
-      ],
-      resources: [`arn:aws:dynamodb:${props.region}:${props.account}:table/*`]
+        effect: iam.Effect.ALLOW,
+        actions: [
+          'dynamodb:PutItem',
+          'dynamodb:GetItem',
+          'dynamodb:UpdateItem',
+          'dynamodb:DeleteItem',
+          'dynamodb:BatchGetItem',
+          'dynamodb:BatchWriteItem',
+          'dynamodb:Query',
+          'dynamodb:Scan',
+          'dynamodb:DescribeTable'
+        ],
+        resources: [
+          props.dynamoTableArn,
+          `${props.dynamoTableArn}/*`
+        ]
     }));
 
     // Build Role

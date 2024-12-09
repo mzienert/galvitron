@@ -38,18 +38,19 @@ export class GalvitronStack extends cdk.Stack {
     // Create S3 Bucket
     const s3Construct = new S3Construct(this, 'S3Construct');
 
-    // Create IAM Roles
-    const iamRoles = new IAMRolesConstruct(this, 'IAMRoles', {
-      sentinelBucket: s3Construct.bucket,
-      region: this.region,
-      account: this.account
-    });
-
     // Create DynamoDB Table
     const dynamoConstruct = new DynamoDBConstruct(this, 'DynamoDBConstruct', {
       tableName: 'GalvitronTable',
       partitionKey: 'id',
       timeToLiveAttribute: 'ttl'
+    });
+
+    // Create IAM Roles
+    const iamRoles = new IAMRolesConstruct(this, 'IAMRoles', {
+      sentinelBucket: s3Construct.bucket,
+      region: this.region,
+      account: this.account,
+      dynamoTableArn: dynamoConstruct.table.tableArn
     });
 
     // Grant table permissions to instance role
@@ -328,8 +329,10 @@ export class GalvitronStack extends cdk.Stack {
 
     new cdk.CfnOutput(this, 'DynamoDBTableName', {
       value: dynamoConstruct.table.tableName,
-      description: 'Name of the DynamoDB table'
+      description: 'Name of the DynamoDB table',
+      exportName: 'GalvitronTableName'
     });
+    
 
     new cdk.CfnOutput(this, 'SentinelBucketName', {
       value: s3Construct.bucket.bucketName,
