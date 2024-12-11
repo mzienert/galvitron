@@ -14,9 +14,33 @@ export class IAMRolesConstruct extends Construct {
   public readonly instanceRole: iam.Role;
   public readonly buildRole: iam.Role;
   public readonly codeDeployServiceRole: iam.Role;
+  public readonly lambdaRole: iam.Role;
 
   constructor(scope: Construct, id: string, props: IAMRolesConstructProps) {
     super(scope, id);
+
+    // Lambda Role
+    this.lambdaRole = new iam.Role(this, 'LambdaRole', {
+      assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
+      description: 'Role for Lambda functions with DynamoDB access',
+      managedPolicies: [
+        iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'),
+      ],
+    });
+
+    // Add DynamoDB read permissions for Lambda
+    this.lambdaRole.addToPolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: [
+        'dynamodb:Query',
+        'dynamodb:Scan',
+        'dynamodb:GetItem',
+      ],
+      resources: [
+        props.dynamoTableArn,
+        `${props.dynamoTableArn}/index/*`, // Allow access to all indexes
+      ]
+    }));
 
     // EC2 Instance Role
     this.instanceRole = new iam.Role(this, 'EC2Role', {
@@ -167,6 +191,21 @@ export class IAMRolesConstruct extends Construct {
         `arn:aws:codedeploy:${props.region}:${props.account}:application:GalvitronApplication`,
         `arn:aws:codedeploy:${props.region}:${props.account}:deploymentconfig:*`
       ]
+    }));
+
+    this.buildRole.addToPolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: [
+        'codecommit:GitPull',
+        'codecommit:GitPush',
+        'codecommit:GitBranch',
+        'codecommit:ListBranches',
+        'codecommit:CreateCommit',
+        'codecommit:GetCommit',
+        'codecommit:GetRepository',
+        'codecommit:ListRepositories'
+      ],
+      resources: ['*']  // Scope this down to specific repositories as needed
     }));
 
     // CodeDeploy Service Role

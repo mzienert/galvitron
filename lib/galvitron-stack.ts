@@ -6,6 +6,7 @@ import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as codedeploy from 'aws-cdk-lib/aws-codedeploy';
 import * as codebuild from 'aws-cdk-lib/aws-codebuild';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
+import * as path from 'path';
 
 import { S3Construct } from './constructs/storage/s3-construct';
 import { DynamoDBConstruct } from './constructs/database/dynamodb-construct';
@@ -25,6 +26,7 @@ export interface GalvitronStackProps extends cdk.StackProps {
 export class GalvitronStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: GalvitronStackProps) {
     super(scope, id, props);
+
 
     // Define tags as constants
     const TAGS = {
@@ -244,32 +246,53 @@ export class GalvitronStack extends cdk.Stack {
       buildSpec: codebuild.BuildSpec.fromObject({
         version: '0.2',
         phases: {
+          install: {
+            commands: [
+              'mkdir -p /tmp/workspace',
+              'cp -r . /tmp/workspace/galvitron',
+              'cd /tmp/workspace',
+              'git clone https://github.com/mzienert/sentinel.git || echo "Repository already exists"'
+            ]
+          },
           pre_build: {
             commands: [
-              'npm ci'
+              // Build Lambda
+              'cd /tmp/workspace/sentinel/lambdas/hello-world',
+              'npm install',
+              'npm run build',
+              'cp -r node_modules dist/',
+              'cp package*.json dist/',
+              'cd /tmp/workspace/sentinel'  // Navigate back to sentinel root
             ]
           },
           build: {
             commands: [
+              // Build main Sentinel app
+              'rm -rf dist',
+              'npm install',
               'npm run build',
-              'npm ci --production'
+              'mkdir -p dist/node_modules',
+              'cp -r node_modules/* dist/node_modules/',
+              'cp package*.json dist/'
             ]
           },
           post_build: {
             commands: [
-              'mkdir -p dist/logs'
+              'mkdir -p dist/logs',
+              'ls -la dist',
+              'ls -la dist/node_modules || echo "no node_modules found"'
             ]
           }
         },
         artifacts: {
-          'base-directory': '.',
+          'base-directory': '/tmp/workspace/sentinel',
           files: [
             'appspec.yml',
             'scripts/**/*',
             'ecosystem.config.js',
-            'node_modules/**/*',
             'package*.json',
-            'dist/**/*'
+            'dist/**/*',
+            'lambdas/hello-world/dist/**/*'
           ]
         }
       })
@@ -289,9 +312,20 @@ export class GalvitronStack extends cdk.Stack {
     // Create Lambda and API Gateway
     const helloWorldFunction = new lambda.Function(this, 'HelloWorldFunction', {
       runtime: lambda.Runtime.NODEJS_20_X,
-      code: lambda.Code.fromAsset('lambda'),
-      handler: 'hello.handler',
+      code: lambda.Code.fromAsset(this.getLambdaPath('hello-world'), {
+        exclude: ['node_modules', 'node_modules/**', '.git', 'README.md']
+      }),
+      handler: 'dist/index.handler',
+      environment: {
+        NODE_ENV: 'production',
+        DYNAMODB_TABLE: dynamoConstruct.table.tableName
+      },
+      memorySize: 256, // Increased for better performance
+      timeout: cdk.Duration.seconds(30),
+      role: iamRoles.lambdaRole, // Use role from IAMRolesConstruct
     });
+
+    dynamoConstruct.table.grantReadData(helloWorldFunction);
 
     const api = new apigateway.LambdaRestApi(this, 'HelloWorldApi', {
       handler: helloWorldFunction,
@@ -353,5 +387,27 @@ export class GalvitronStack extends cdk.Stack {
       value: pipelineConstruct.pipeline.pipelineArn,
       description: 'Pipeline ARN',
     });
+
+    // Lambda Function Outputs
+    new cdk.CfnOutput(this, 'LambdaFunctionArn', {
+      value: helloWorldFunction.functionArn,
+      description: 'ARN of the Hello World Lambda function',
+      exportName: 'HelloWorldLambdaArn'
+    });
+
+    new cdk.CfnOutput(this, 'ApiGatewayUrl', {
+      value: api.url,
+      description: 'URL of the API Gateway endpoint',
+      exportName: 'HelloWorldApiUrl'
+    });
+  }
+
+  private getLambdaPath(lambdaName: string): string {
+    // If we're in CodeBuild environment
+    if (process.env.CODEBUILD_BUILD_ID) {
+      return `/tmp/workspace/sentinel/lambdas/${lambdaName}`;
+    }
+    // For local development
+    return path.join(__dirname, '..', '..', 'sentinel', 'lambdas', lambdaName);
   }
 }
