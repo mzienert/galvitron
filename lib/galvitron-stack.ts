@@ -13,6 +13,7 @@ import { DynamoDBConstruct } from './constructs/database/dynamodb-construct';
 import { EC2Construct } from './constructs/compute/ec2-construct';
 import { VPCConstruct } from './constructs/network/vpc-construct';
 import { CodePipelineConstruct } from './constructs/pipeline/codepipeline-construct';
+import { NextJSPipelineConstruct } from './constructs/pipeline/nextjs-pipeline-construct';
 import { IAMRolesConstruct } from './constructs/roles/iam-roles-construct';
 import { CognitoPool } from '../cognito';
 
@@ -24,6 +25,8 @@ export interface GalvitronStackProps extends cdk.StackProps {
 }
 
 export class GalvitronStack extends cdk.Stack {
+  private readonly dynamoConstruct: DynamoDBConstruct;
+
   constructor(scope: Construct, id: string, props: GalvitronStackProps) {
     super(scope, id, props);
 
@@ -41,9 +44,8 @@ export class GalvitronStack extends cdk.Stack {
     const s3Construct = new S3Construct(this, 'S3Construct');
 
     // Create DynamoDB Table
-    const dynamoConstruct = new DynamoDBConstruct(this, 'DynamoDBConstruct', {
+    this.dynamoConstruct = new DynamoDBConstruct(this, 'KlineTable', {
       tableName: 'GalvitronTable',
-      partitionKey: 'id',
       timeToLiveAttribute: 'ttl'
     });
 
@@ -52,11 +54,11 @@ export class GalvitronStack extends cdk.Stack {
       sentinelBucket: s3Construct.bucket,
       region: this.region,
       account: this.account,
-      dynamoTableArn: dynamoConstruct.table.tableArn
+      dynamoTableArn: this.dynamoConstruct.table.tableArn
     });
 
     // Grant table permissions to instance role
-    dynamoConstruct.table.grantReadWriteData(iamRoles.instanceRole);
+    this.dynamoConstruct.table.grantReadWriteData(iamRoles.instanceRole);
 
     // Create wait condition handle for EC2 instance
     const handle = new cdk.CfnWaitConditionHandle(this, 'WaitHandle');
@@ -309,6 +311,13 @@ export class GalvitronStack extends cdk.Stack {
       deploymentGroup: deploymentGroup
     });
 
+    const nextjsPipelineConstruct = new NextJSPipelineConstruct(this, 'NextJSPipelineConstruct', {
+      githubOwner: 'mzienert',
+      githubRepo: 'blubrd',
+      githubBranch: 'main',
+      githubTokenSecretName: props.githubTokenSecretName,
+    });
+
     // Create Lambda and API Gateway
     const helloWorldFunction = new lambda.Function(this, 'HelloWorldFunction', {
       runtime: lambda.Runtime.NODEJS_20_X,
@@ -318,14 +327,14 @@ export class GalvitronStack extends cdk.Stack {
       handler: 'dist/index.handler',
       environment: {
         NODE_ENV: 'production',
-        DYNAMODB_TABLE: dynamoConstruct.table.tableName
+        DYNAMODB_TABLE: this.dynamoConstruct.table.tableName
       },
       memorySize: 256, // Increased for better performance
       timeout: cdk.Duration.seconds(30),
       role: iamRoles.lambdaRole, // Use role from IAMRolesConstruct
     });
 
-    dynamoConstruct.table.grantReadData(helloWorldFunction);
+    this.dynamoConstruct.table.grantReadData(helloWorldFunction);   
 
     const api = new apigateway.LambdaRestApi(this, 'HelloWorldApi', {
       handler: helloWorldFunction,
@@ -362,7 +371,7 @@ export class GalvitronStack extends cdk.Stack {
     });
 
     new cdk.CfnOutput(this, 'DynamoDBTableName', {
-      value: dynamoConstruct.table.tableName,
+      value: this.dynamoConstruct.table.tableName,
       description: 'Name of the DynamoDB table',
       exportName: 'GalvitronTableName'
     });
@@ -399,6 +408,16 @@ export class GalvitronStack extends cdk.Stack {
       value: api.url,
       description: 'URL of the API Gateway endpoint',
       exportName: 'HelloWorldApiUrl'
+    });
+
+    new cdk.CfnOutput(this, 'NextJSWebsiteURL', {
+      value: `https://${nextjsPipelineConstruct.distribution.distributionDomainName}`,
+      description: 'Next.js Website URL',
+    });
+    
+    new cdk.CfnOutput(this, 'NextJSPipelineArn', {
+      value: nextjsPipelineConstruct.pipeline.pipelineArn,
+      description: 'Next.js Pipeline ARN',
     });
   }
 

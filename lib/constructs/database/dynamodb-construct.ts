@@ -4,7 +4,6 @@ import { Construct } from 'constructs';
 
 export interface DynamoDBConstructProps {
   tableName: string;
-  partitionKey: string;
   timeToLiveAttribute?: string;
 }
 
@@ -17,20 +16,24 @@ export class DynamoDBConstruct extends Construct {
     this.table = new dynamodb.Table(this, 'Table', {
       tableName: props.tableName,
       partitionKey: {
-        name: props.partitionKey,
+        name: 'pk',
         type: dynamodb.AttributeType.STRING
       },
+      sortKey: {
+        name: 'sk',
+        type: dynamodb.AttributeType.NUMBER
+      },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-      timeToLiveAttribute: props.timeToLiveAttribute,
+      timeToLiveAttribute: props.timeToLiveAttribute || 'ttl',
       removalPolicy: cdk.RemovalPolicy.DESTROY,
-      stream: dynamodb.StreamViewType.NEW_AND_OLD_IMAGES // Enable streaming for better GSI backfilling
+      stream: dynamodb.StreamViewType.NEW_AND_OLD_IMAGES
     });
 
-    // Add GSI for symbol-timestamp queries
+    // Add GSI for querying by exchange across all symbols
     this.table.addGlobalSecondaryIndex({
-      indexName: 'symbol-timestamp-index',
+      indexName: 'exchange-timestamp-index',
       partitionKey: {
-        name: 'type',
+        name: 'exchange',
         type: dynamodb.AttributeType.STRING
       },
       sortKey: {
