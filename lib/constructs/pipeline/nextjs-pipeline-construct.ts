@@ -37,13 +37,50 @@ export class NextJSPipelineConstruct extends Construct {
       }),
       removalPolicy: cdk.RemovalPolicy.DESTROY,
       autoDeleteObjects: true,
+      cors: [
+        {
+          allowedMethods: [s3.HttpMethods.GET],
+          allowedOrigins: ['*'],
+          allowedHeaders: ['*'],
+        },
+      ],
     });
 
-    // Create build project
+    // Create CloudFront distribution first so we can use its ID in the build project
+    this.distribution = new cloudfront.Distribution(this, 'WebsiteDistribution', {
+      defaultBehavior: {
+        origin: new origins.S3Origin(this.websiteBucket),
+        viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+        compress: true,
+        cachePolicy: new cloudfront.CachePolicy(this, 'WebsiteCachePolicy', {
+          minTtl: cdk.Duration.seconds(0),
+          maxTtl: cdk.Duration.days(365),
+          defaultTtl: cdk.Duration.hours(24),
+          enableAcceptEncodingBrotli: true,
+          enableAcceptEncodingGzip: true,
+        }),
+      },
+      defaultRootObject: 'index.html',
+      errorResponses: [
+        {
+          httpStatus: 404,
+          responseHttpStatus: 404,
+          responsePagePath: '/404.html',
+        },
+      ],
+    });
+
+    // Create build project with invalidation step
     const buildProject = new codebuild.PipelineProject(this, 'NextJSBuild', {
       environment: {
         buildImage: codebuild.LinuxBuildImage.STANDARD_7_0,
         privileged: true,
+        environmentVariables: {
+          CLOUDFRONT_DISTRIBUTION_ID: {
+            value: this.distribution.distributionId,
+            type: codebuild.BuildEnvironmentVariableType.PLAINTEXT,
+          },
+        },
       },
       buildSpec: codebuild.BuildSpec.fromObject({
         version: '0.2',
@@ -58,13 +95,20 @@ export class NextJSPipelineConstruct extends Construct {
             commands: [
               'echo "Building Next.js application..."',
               'npm run build',
-              'echo "Creating output directory..."',
-              'mkdir -p out',
-              'echo "Copying build output..."',
-              'cp -r .next/* out/',
-              'echo "Copying public assets..."',
-              'cp -r public/* out/',
-              'ls -la out/'
+              'ls -la',
+              'ls -la .next/'
+            ]
+          },
+          post_build: {
+            commands: [
+              'echo "Setting cache control headers..."',
+              'cd .next',
+              'aws s3 sync . s3://${WEBSITE_BUCKET} --delete --cache-control "public, max-age=31536000, immutable"',
+              'cd ../public',
+              'aws s3 sync . s3://${WEBSITE_BUCKET} --cache-control "public, max-age=31536000, immutable"',
+              // Create CloudFront invalidation
+              'echo "Creating CloudFront invalidation..."',
+              'aws cloudfront create-invalidation --distribution-id ${CLOUDFRONT_DISTRIBUTION_ID} --paths "/*"',
             ]
           }
         },
@@ -81,6 +125,12 @@ export class NextJSPipelineConstruct extends Construct {
         }
       })
     });
+
+    // Grant necessary permissions to the build project
+    buildProject.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['cloudfront:CreateInvalidation'],
+      resources: [`arn:aws:cloudfront::${cdk.Stack.of(this).account}:distribution/${this.distribution.distributionId}`],
+    }));
 
     // Create artifacts
     const sourceOutput = new codepipeline.Artifact('SourceOutput');
@@ -121,11 +171,16 @@ export class NextJSPipelineConstruct extends Construct {
           project: buildProject,
           input: sourceOutput,
           outputs: [buildOutput],
+          environmentVariables: {
+            WEBSITE_BUCKET: {
+              value: this.websiteBucket.bucketName,
+            },
+          },
         }),
       ],
     });
 
-    // Add deploy stage
+    // Add deploy stage with invalidation
     this.pipeline.addStage({
       stageName: 'Deploy',
       actions: [
@@ -135,23 +190,6 @@ export class NextJSPipelineConstruct extends Construct {
           bucket: this.websiteBucket,
           extract: true,
         }),
-      ],
-    });
-
-    // Create CloudFront distribution
-    this.distribution = new cloudfront.Distribution(this, 'WebsiteDistribution', {
-      defaultBehavior: {
-        origin: new origins.S3Origin(this.websiteBucket),
-        viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
-        compress: true,
-      },
-      defaultRootObject: 'index.html',
-      errorResponses: [
-        {
-          httpStatus: 404,
-          responseHttpStatus: 404,
-          responsePagePath: '/404.html',
-        },
       ],
     });
 
