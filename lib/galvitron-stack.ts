@@ -45,8 +45,7 @@ export class GalvitronStack extends cdk.Stack {
 
     // Create DynamoDB Table
     this.dynamoConstruct = new DynamoDBConstruct(this, 'KlineTable', {
-      tableName: 'GalvitronTable',
-      timeToLiveAttribute: 'ttl'
+      tableName: 'GalvitronTable'
     });
 
     // Create IAM Roles

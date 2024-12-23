@@ -4,7 +4,6 @@ import { Construct } from 'constructs';
 
 export interface DynamoDBConstructProps {
   tableName: string;
-  timeToLiveAttribute?: string;
 }
 
 export class DynamoDBConstruct extends Construct {
@@ -24,7 +23,6 @@ export class DynamoDBConstruct extends Construct {
         type: dynamodb.AttributeType.NUMBER
       },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-      timeToLiveAttribute: props.timeToLiveAttribute || 'ttl',
       removalPolicy: cdk.RemovalPolicy.DESTROY,
       stream: dynamodb.StreamViewType.NEW_AND_OLD_IMAGES
     });
