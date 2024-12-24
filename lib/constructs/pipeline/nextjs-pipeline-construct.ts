@@ -157,7 +157,7 @@ export class NextJSPipelineConstruct extends Construct {
           branch: props.githubBranch,
           oauthToken: cdk.SecretValue.secretsManager(props.githubTokenSecretName),
           output: sourceOutput,
-          trigger: codepipeline_actions.GitHubTrigger.POLL
+          trigger: codepipeline_actions.GitHubTrigger.WEBHOOK
         }),
       ],
     });

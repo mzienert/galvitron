@@ -100,7 +100,11 @@ export class GalvitronStack extends cdk.Stack {
       
       // System Updates and Base Packages
       'yum update -y || error_exit "Failed to update system packages"',
-      'yum install -y ruby wget || error_exit "Failed to install base packages"',
+      'yum install -y ruby wget cronie || error_exit "Failed to install base packages"',
+
+      // Start and enable crond service
+      'systemctl start crond || error_exit "Failed to start crond service"',
+      'systemctl enable crond || error_exit "Failed to enable crond service"',
       
       // Node.js Setup
       'sudo mkdir -p /home/ec2-user/.nvm',
